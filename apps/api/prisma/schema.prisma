@@ -1,0 +1,982 @@
+// ============================================================================
+// career-ops — Prisma Schema
+// PostgreSQL · Prisma ORM
+//
+// DOCTRINE (settled, #918):
+//   data/applications.md  → permanent source of truth
+//   PostgreSQL             → derived cache + extended relational data
+//   FILE ALWAYS WINS over DB on conflict.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum ApplicationStatus {
+  EVALUATED
+  APPLIED
+  RESPONDED
+  INTERVIEW
+  OFFER
+  REJECTED
+  DISCARDED
+  SKIP
+  HIRED
+
+  @@map("application_status")
+}
+
+enum RoleArchetype {
+  AI_PLATFORM_LLMOPS
+  AGENTIC_AUTOMATION
+  TECHNICAL_AI_PM
+  AI_SOLUTIONS_ARCHITECT
+  OTHER
+
+  @@map("role_archetype")
+}
+
+enum SpendTier {
+  ECONOMY
+  STANDARD
+  PREMIUM
+
+  @@map("spend_tier")
+}
+
+enum EvalBlock {
+  A_ROLE_SUMMARY
+  B_CV_MATCH
+  C_LEVEL_STRATEGY
+  D_COMPENSATION
+  E_CUSTOMIZATION_PLAN
+  F_INTERVIEW_PLAN
+  G_LEGITIMACY
+
+  @@map("eval_block")
+}
+
+enum LegitimacyTier {
+  HIGH_CONFIDENCE
+  PROCEED_WITH_CAUTION
+  SUSPICIOUS
+
+  @@map("legitimacy_tier")
+}
+
+enum DocumentType {
+  CV_HTML
+  CV_PDF
+  CV_LATEX
+  COVER_LETTER_HTML
+  COVER_LETTER_PDF
+  APPLICATION_EMAIL
+  OUTREACH_MESSAGE
+  OFFER_NOTES
+
+  @@map("document_type")
+}
+
+enum InterviewRoundType {
+  PHONE_SCREEN
+  TECHNICAL
+  SYSTEM_DESIGN
+  BEHAVIORAL
+  HIRING_MANAGER
+  PANEL
+  TAKE_HOME
+  OFFER_CALL
+  OTHER
+
+  @@map("interview_round_type")
+}
+
+enum InterviewOutcome {
+  PENDING
+  PASSED
+  FAILED
+  WITHDREW
+  NO_SHOW
+
+  @@map("interview_outcome")
+}
+
+enum ContactType {
+  RECRUITER
+  HIRING_MANAGER
+  PEER
+  INTERVIEWER
+  TALENT_PARTNER
+  AGENCY
+
+  @@map("contact_type")
+}
+
+enum NoteVisibility {
+  PRIVATE
+  SHARED
+
+  @@map("note_visibility")
+}
+
+enum ActivityType {
+  STATUS_CHANGED
+  NOTE_ADDED
+  DOCUMENT_GENERATED
+  EMAIL_DRAFTED
+  INTERVIEW_SCHEDULED
+  INTERVIEW_COMPLETED
+  OFFER_RECEIVED
+  FOLLOW_UP_SENT
+  APPLICATION_SUBMITTED
+  SCAN_FOUND
+  EVALUATION_COMPLETED
+  SHEETS_SYNCED
+  REMINDER_FIRED
+  PLUGIN_HOOK
+
+  @@map("activity_type")
+}
+
+enum ReminderStatus {
+  PENDING
+  FIRED
+  DISMISSED
+
+  @@map("reminder_status")
+}
+
+enum ConflictResolution {
+  UNRESOLVED
+  LOCAL_WINS
+  REMOTE_WINS
+  MANUAL
+
+  @@map("conflict_resolution")
+}
+
+enum ClipStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  DUPLICATE
+
+  @@map("clip_status")
+}
+
+enum QueueJobType {
+  EVALUATE
+  PDF
+  SCAN
+  GMAIL_SYNC
+  SHEETS_SYNC
+
+  @@map("queue_job_type")
+}
+
+enum QueueJobStatus {
+  WAITING
+  ACTIVE
+  COMPLETED
+  FAILED
+  DELAYED
+
+  @@map("queue_job_status")
+}
+
+// ============================================================================
+// USERS & AUTH
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  settings        UserSettings?
+  applications    Application[]
+  documents       Document[]
+  notes           Note[]
+  reminders       Reminder[]
+  activities      Activity[]
+  resumeVersions  ResumeVersion[]
+  aiEvaluations   AiEvaluation[]
+  extensionTokens ExtensionToken[]
+  oauthTokens     OAuthToken[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  accessTokenEnc    String?
+  refreshTokenEnc   String?
+  expiresAt         Int?
+  tokenType         String?
+  scope             String?
+  idToken           String?
+  sessionState      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// USER SETTINGS
+// ============================================================================
+
+model UserSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  fullName        String?
+  phone           String?
+  locationCity    String?
+  locationCountry String?
+  timezone        String?
+  linkedinUrl     String?
+  portfolioUrl    String?
+  githubUrl       String?
+
+  primaryRoles   String[]
+  spendTier      SpendTier @default(STANDARD)
+
+  compTargetMin  Int?
+  compTargetMax  Int?
+  compMinimum    Int?
+  compCurrency   String?   @default("USD")
+
+  outputLanguage String?   @default("en")
+  modesDirKey    String?
+  cvOutputFormat String?   @default("html")
+
+  autoPdfScoreThreshold Float? @default(3.0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ============================================================================
+// COMPANIES
+// ============================================================================
+
+model Company {
+  id            String  @id @default(cuid())
+  slug          String  @unique
+  name          String
+  website       String?
+  atsProvider   String?
+  atsBaseUrl    String?
+  linkedinUrl   String?
+  crunchbaseUrl String?
+
+  legitimacyTier  LegitimacyTier?
+  legitimacyNotes String?
+
+  isBlacklisted   Boolean  @default(false)
+  blacklistReason String?
+  blacklistedAt   DateTime?
+
+  reApplyWindowDays Int?
+  lastAppliedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications Application[]
+  contacts     CompanyContact[]
+  notes        Note[]
+  tags         TagAssignment[]
+
+  @@map("companies")
+}
+
+model CompanyContact {
+  id          String      @id @default(cuid())
+  companyId   String
+  type        ContactType
+  name        String
+  title       String?
+  email       String?
+  linkedinUrl String?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@map("company_contacts")
+}
+
+// ============================================================================
+// APPLICATIONS
+// ============================================================================
+
+model Application {
+  id     String @id @default(cuid())
+  userId String
+
+  num          Int               @unique
+  appliedAt    DateTime?
+  companyId    String?
+  role         String
+  status       ApplicationStatus @default(EVALUATED)
+  score        Float?
+  pdfGenerated Boolean           @default(false)
+  reportPath   String?
+  via          String?
+  trackerNotes String?
+
+  mdChecksum    String?
+  mdRowSnapshot String?
+
+  archetypeA     RoleArchetype?
+  archetypeB     RoleArchetype?
+  legitimacyTier LegitimacyTier?
+
+  advertisedCompMin      Int?
+  advertisedCompMax      Int?
+  advertisedCompCurrency String? @default("USD")
+
+  sheetsRow          Int?
+  sheetsLastSyncedAt DateTime?
+
+  primaryContactId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company        Company?         @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  recruiters     Recruiter[]
+  primaryContact CompanyContact?  @relation(fields: [primaryContactId], references: [id], onDelete: SetNull)
+
+  statusHistory   StatusHistory[]
+  salaryObs       SalaryObservation[]
+  documents       Document[]
+  interviews      Interview[]
+  notes           Note[]
+  activities      Activity[]
+  reminders       Reminder[]
+  tags            TagAssignment[]
+  aiEvaluations   AiEvaluation[]
+  assessments     Assessment[]
+  extensionClip   ExtensionClip?
+  sheetsConflicts SheetsConflict[]
+
+  @@index([num])
+  @@index([status])
+  @@index([companyId])
+  @@index([userId, status])
+  @@map("applications")
+}
+
+// ============================================================================
+// STATUS HISTORY (append-only)
+// ============================================================================
+
+model StatusHistory {
+  id             String             @id @default(cuid())
+  applicationId  String
+  applicationNum Int
+
+  fromStatus ApplicationStatus?
+  toStatus   ApplicationStatus
+  source     String
+  note       String?
+
+  occurredAt DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([occurredAt])
+  @@map("status_history")
+}
+
+// ============================================================================
+// RECRUITERS
+// ============================================================================
+
+model Recruiter {
+  id            String      @id @default(cuid())
+  applicationId String
+  type          ContactType @default(RECRUITER)
+
+  name        String
+  title       String?
+  email       String?
+  linkedinUrl String?
+  agencyName  String?
+  notes       String?
+
+  outreachSentAt     DateTime?
+  outreachMessage    String?
+  responseReceivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("recruiters")
+}
+
+// ============================================================================
+// RESUME VERSIONS
+// ============================================================================
+
+model ResumeVersion {
+  id     String @id @default(cuid())
+  userId String
+
+  label         String
+  contentMd     String @db.Text
+  cvChecksum    String
+  applicationId String?
+
+  spendTier SpendTier?
+  modelName String?
+
+  createdAt DateTime @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([userId])
+  @@index([applicationId])
+  @@map("resume_versions")
+}
+
+// ============================================================================
+// DOCUMENTS
+// ============================================================================
+
+model Document {
+  id              String       @id @default(cuid())
+  userId          String
+  applicationId   String?
+  resumeVersionId String?
+
+  type         DocumentType
+  fileName     String
+  filePath     String
+  mimeType     String
+  contentText  String?      @db.Text
+  templateName String?
+  sha256       String?
+
+  reviewedByUser Boolean  @default(false)
+  reviewedAt     DateTime?
+
+  createdAt DateTime @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application?   @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  resumeVersion ResumeVersion? @relation(fields: [resumeVersionId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId])
+  @@index([userId, type])
+  @@map("documents")
+}
+
+// ============================================================================
+// INTERVIEWS
+// ============================================================================
+
+model Interview {
+  id            String @id @default(cuid())
+  applicationId String
+
+  companyName    String
+  role           String
+  prepReportPath String?
+  redFlagRating  Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  rounds      InterviewRound[]
+  notes       Note[]
+
+  @@map("interviews")
+}
+
+model InterviewRound {
+  id          String             @id @default(cuid())
+  interviewId String
+
+  roundNumber    Int
+  type           InterviewRoundType
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  outcome        InterviewOutcome   @default(PENDING)
+  interviewerName String?
+  durationMins   Int?
+  format         String?
+  notes          String?            @db.Text
+
+  storyBankSlugs String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@map("interview_rounds")
+}
+
+// ============================================================================
+// NOTES (polymorphic)
+// ============================================================================
+
+model Note {
+  id     String @id @default(cuid())
+  userId String
+
+  applicationId String?
+  interviewId   String?
+  companyId     String?
+
+  content    String         @db.Text
+  visibility NoteVisibility @default(PRIVATE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  interview   Interview?   @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  company     Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([interviewId])
+  @@map("notes")
+}
+
+// ============================================================================
+// ACTIVITIES (append-only)
+// ============================================================================
+
+model Activity {
+  id     String @id @default(cuid())
+  userId String
+
+  applicationId String?
+  companyId     String?
+
+  type       ActivityType
+  summary    String
+  detail     Json?
+  source     String?
+
+  occurredAt DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([applicationId])
+  @@map("activities")
+}
+
+// ============================================================================
+// TAGS
+// ============================================================================
+
+model Tag {
+  id    String  @id @default(cuid())
+  name  String  @unique
+  color String?
+
+  createdAt DateTime @default(now())
+
+  assignments TagAssignment[]
+
+  @@map("tags")
+}
+
+model TagAssignment {
+  id String @id @default(cuid())
+
+  tagId         String
+  applicationId String?
+  companyId     String?
+
+  assignedAt DateTime @default(now())
+
+  tag         Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  company     Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, applicationId])
+  @@unique([tagId, companyId])
+  @@map("tag_assignments")
+}
+
+// ============================================================================
+// REMINDERS
+// ============================================================================
+
+model Reminder {
+  id     String @id @default(cuid())
+  userId String
+
+  applicationId String?
+
+  title      String
+  body       String?
+  dueAt      DateTime
+  status     ReminderStatus @default(PENDING)
+  firedAt    DateTime?
+  dismissedAt DateTime?
+
+  isFollowUp       Boolean @default(false)
+  followUpSequence Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dueAt])
+  @@index([status, dueAt])
+  @@map("reminders")
+}
+
+// ============================================================================
+// AI EVALUATIONS
+// ============================================================================
+
+model AiEvaluation {
+  id            String @id @default(cuid())
+  userId        String
+  applicationId String
+
+  modelName        String
+  spendTier        SpendTier
+  promptTokens     Int?
+  completionTokens Int?
+  estimatedCostUsd Float?
+
+  scoreMatch     Float?
+  scoreNorthStar Float?
+  scoreComp      Float?
+  scoreCultural  Float?
+  scoreRedFlags  Float?
+  scoreGlobal    Float
+
+  legitimacyTier   LegitimacyTier?
+  legitimacyReason String?
+
+  reportMd   String? @db.Text
+  reportPath String?
+
+  jdUrl      String?
+  jdPath     String?
+  cvChecksum String?
+
+  evaluatedAt DateTime @default(now())
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  blockScores AiBlockScore[]
+
+  @@index([applicationId])
+  @@index([userId, evaluatedAt])
+  @@map("ai_evaluations")
+}
+
+model AiBlockScore {
+  id             String    @id @default(cuid())
+  aiEvaluationId String
+
+  block   EvalBlock
+  score   Float?
+  summary String?   @db.Text
+
+  aiEvaluation AiEvaluation @relation(fields: [aiEvaluationId], references: [id], onDelete: Cascade)
+
+  @@unique([aiEvaluationId, block])
+  @@map("ai_block_scores")
+}
+
+// ============================================================================
+// SALARY OBSERVATIONS (append-only)
+// ============================================================================
+
+model SalaryObservation {
+  id            String @id @default(cuid())
+  applicationId String?
+  applicationNum Int?
+
+  observationType String
+  amount          Int
+  currency        String @default("USD")
+  source          String
+  note            String?
+
+  observedAt DateTime @default(now())
+
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId])
+  @@map("salary_observations")
+}
+
+// ============================================================================
+// ASSESSMENTS (append-only)
+// ============================================================================
+
+model Assessment {
+  id            String  @id @default(cuid())
+  applicationId String?
+  applicationNum Int?
+
+  platform     String
+  subject      String
+  thresholdPct Int?
+  scorePct     Int?
+  staleNote    String?
+
+  takenAt DateTime @default(now())
+
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@map("assessments")
+}
+
+// ============================================================================
+// GOOGLE SYNC
+// ============================================================================
+
+model OAuthToken {
+  id       String @id @default(cuid())
+  userId   String
+  provider String
+  scope    String
+
+  accessTokenEnc  String
+  refreshTokenEnc String?
+  expiresAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("oauth_tokens")
+}
+
+model SheetMapping {
+  id      String @id @default(cuid())
+  userId  String
+  sheetId String
+  tabName String
+  tabGid  String
+
+  lastSyncAt   DateTime?
+  lastLocalSeq  Int?
+  lastRemoteSeq Int?
+  syncEnabled  Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conflicts SheetsConflict[]
+
+  @@unique([userId, sheetId, tabGid])
+  @@map("sheet_mappings")
+}
+
+model SheetsConflict {
+  id             String @id @default(cuid())
+  sheetMappingId String
+  applicationId  String
+
+  columnName    String
+  localValue    String
+  remoteValue   String
+  resolution    ConflictResolution @default(UNRESOLVED)
+  resolvedValue String?
+  resolvedAt    DateTime?
+
+  detectedAt DateTime @default(now())
+
+  sheetMapping SheetMapping @relation(fields: [sheetMappingId], references: [id], onDelete: Cascade)
+  application  Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("sheets_conflicts")
+}
+
+// ============================================================================
+// BROWSER EXTENSION
+// ============================================================================
+
+model ExtensionClip {
+  id     String @id @default(cuid())
+  userId String
+
+  url           String
+  title         String?
+  companyName   String?
+  rawHtml       String?    @db.Text
+  extractedJson Json?
+  jdFingerprint String?
+
+  status        ClipStatus @default(PENDING)
+  failureReason String?
+
+  applicationId String?   @unique
+
+  clippedAt   DateTime @default(now())
+  processedAt DateTime?
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([jdFingerprint])
+  @@map("extension_clips")
+}
+
+model ExtensionToken {
+  id     String @id @default(cuid())
+  userId String
+
+  tokenHash  String   @unique
+  deviceName String?
+  scope      String   @default("clip:write eval:read")
+
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("extension_tokens")
+}
+
+// ============================================================================
+// QUEUE JOBS
+// ============================================================================
+
+model QueueJob {
+  id     String @id @default(cuid())
+  userId String?
+
+  bullmqJobId   String         @unique
+  type          QueueJobType
+  status        QueueJobStatus
+  payload       Json?
+  result        Json?
+  failureReason String?
+  attemptCount  Int            @default(0)
+  maxAttempts   Int            @default(3)
+
+  modelName        String?
+  estimatedCostUsd Float?
+
+  applicationId String?
+
+  enqueuedAt  DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+
+  @@index([type, status])
+  @@index([userId, enqueuedAt])
+  @@map("queue_jobs")
+}
+
+// ============================================================================
+// AI PROMPT CACHE
+// ============================================================================
+
+model AiPromptCache {
+  id String @id @default(cuid())
+
+  cacheKey     String    @unique
+  jdUrl        String
+  cvChecksum   String
+  spendTier    SpendTier
+
+  evaluationId String?
+  resultJson   Json?
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("ai_prompt_cache")
+}
+
+// ============================================================================
+// SCAN RUNS
+// ============================================================================
+
+model ScanRun {
+  id String @id @default(cuid())
+
+  runAt         DateTime @default(now())
+  portalCount   Int
+  foundCount    Int
+  deduped       Int
+  enqueuedCount Int
+
+  @@index([runAt])
+  @@map("scan_runs")
+}

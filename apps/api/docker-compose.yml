@@ -1,0 +1,90 @@
+# ============================================================================
+# career-ops — Docker Compose
+# Services: api + postgres + redis
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose up -d postgres redis   # infra only (for local dev)
+#   docker compose logs -f api    # tail API logs
+#   docker compose down -v        # stop + delete volumes
+# ============================================================================
+
+version: "3.9"
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: career_ops_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: career_ops
+      POSTGRES_PASSWORD: career_ops_dev
+      POSTGRES_DB: career_ops
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U career_ops -d career_ops"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (BullMQ queue backend) ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: career_ops_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API ─────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: career_ops_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://career_ops:career_ops_dev@postgres:5432/career_ops?schema=public
+      REDIS_URL: redis://redis:6379
+      CAREER_OPS_AUTH: none
+      # Override these in .env for production:
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_replace_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CAREER_OPS_ROOT: ${CAREER_OPS_ROOT:-/career-ops}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+    ports:
+      - "3001:3001"
+    volumes:
+      # Mount the career-ops project root so the API can shell out to scripts.
+      # In production, use an absolute host path via CAREER_OPS_ROOT env var.
+      - ${CAREER_OPS_ROOT:-../../}:/career-ops:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
